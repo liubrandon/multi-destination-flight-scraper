@@ -1,25 +1,31 @@
 import requests
 import json
 import gspread
+import pygsheets
+import time
 from oauth2client.service_account import ServiceAccountCredentials
 from pprint import pprint
 # Constants
-DEPARTURE_HUBS = ["ATL", "ORD", "DFW", "DEN", "LAX", "MIA", "NYC"]
+DEPARTURE_HUBS = ("ATL", "ORD", "DFW", "DEN", "LAX", "MIA", "NYC")
+YEAR = "2021"        # MM-DD          MM-DD
+DATE_RANGES = ((YEAR+"-05-15", YEAR+"-06-19"),
+               (YEAR+"-05-22", YEAR+"-07-31"),
+               (YEAR+"-06-05", YEAR+"-07-10"))
+SHEET_TITLE = "CIPE Budget Standards Generator"
+
+# Google Sheets integration
+client = pygsheets.authorize(service_file='./client_secret.json')
+sheet = client.open(SHEET_TITLE)
+worksheet1 = sheet.sheet1
+
+# Skyscanner API Parameters
 CURRENCY = "USD"
 COUNTRY = "US"
 LOCALE = "en-US"
 
-# Google Sheets integration
-scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets',
-         "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("client_secret.json", scope)
-client = gspread.authorize(creds)
-sheet = client.open("CIPE Budget Standards Generator").sheet1
-data = sheet.get_all_records()
-
-
 def getAirportCode(airportCity):
-    "Uses the AirportsFinder API to take the name of an airport (String) and return the first airport code (String)"
+    """Uses the AirportsFinder API to take the name of an airport (String) and returns the first airport code (String)
+    If no results from the search then returns the empty string"""
     url = "https://cometari-airportsfinder-v1.p.rapidapi.com/api/airports/by-text"
     querystring = {"text": airportCity}
     headers = {
@@ -28,8 +34,7 @@ def getAirportCode(airportCity):
     }
     response = requests.request("GET", url, headers=headers, params=querystring)
     jsonData = json.loads(response.text)
-    return jsonData[0]["code"]
-
+    return jsonData[0]["code"] if jsonData else ""
 
 def getAverageFlightPrice(originPlace, destinationPlace, outboundPartialDate, inboundPartialDate):
     """Calls Skyscanner Browse Routes Inbound API endpoint and returns the mean price from quotes in their cache
@@ -57,6 +62,20 @@ def getAverageFlightPrice(originPlace, destinationPlace, outboundPartialDate, in
     avgPrice = pricesSum/len(quotes)
     return avgPrice
 
+
+def initAirportCodesFromColumn(col):
+    """Takes a column of city names from col and initializes the column to the right with their corresponding IATA airport code
+
+    Arguments:
+        col {int} -- Column # (A->1, B->2,...)
+    """
+    airportCities = worksheet1.get_col(col)
+    airportCodes = []
+    for i, city in enumerate(airportCities[1:]):
+        airportCodes.append(getAirportCode(city))
+        time.sleep(1)
+        worksheet1.update_value((i+2, 4), airportCodes[i])
+
 # Object to hold information about a particular destination
 class DestinationInfo:
     def __init__(self, row, country, airportCity):
@@ -65,10 +84,5 @@ class DestinationInfo:
         self.airportCity = airportCity
         self.airportCode = getAirportCode(airportCity)
 
-
-testDest = DestinationInfo(1, "Singapore", "Singapore")
-print(testDest.airportCode)
-
-# test = getAverageFlightPrice("CHIA-sky", "SINS-sky", "2020-06-15", "2020-08-24")
-# print(test)
+# getAirportCodesFromColumn(3)
 
